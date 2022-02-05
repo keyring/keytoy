@@ -23,8 +23,13 @@ typedef struct
   drmModeConnectorPtr connector_p;
   drmModeFBPtr default_fb_p;
   drmModeCrtcPtr crtc_p;
+
   struct gbm_device *gbmdevice;
   struct gbm_surface *gbmsurface;
+
+  struct gbm_bo *previous_bo;
+  uint32_t previous_fb;
+
   int default_fb_width;
   int default_fb_height;
 } device_t;
@@ -183,6 +188,48 @@ void CreateRenderContext(device_t *device, canvas_t *canvas)
 
 }
 
+void SwapBuffer(device_t *device, canvas_t *canvas)
+{
+  eglSwapBuffers(canvas->display, canvas->surface);
+
+  struct gbm_bo *bo = gbm_surface_lock_front_buffer(device->gbmsurface);
+  assert(bo);
+
+  uint32_t customize_fb;
+  assert(!drmModeAddFB(device->drm_fd, gbm_bo_get_width(bo),
+                       gbm_bo_get_height(bo), 24,
+                       gbm_bo_get_bpp(bo),
+                       gbm_bo_get_stride(bo),
+                       gbm_bo_get_handle(bo).u32,
+                       &customize_fb));
+
+  // show my fb
+  assert(!drmModeSetCrtc(device->drm_fd,device->crtc_p->crtc_id, customize_fb, 0, 0,
+                         &device->connector_p->connector_id, 1, &device->crtc_p->mode));
+
+  if (device->previous_bo) {
+    drmModeRmFB(device->drm_fd, device->previous_fb);
+    gbm_surface_release_buffer(device->gbmsurface, device->previous_bo);
+  }
+
+  device->previous_bo = bo;
+  device->previous_fb = customize_fb;
+
+}
+
+void RestoreDefaultFramebuffer(device_t *device)
+{
+  // restore previous fb
+  assert(!drmModeSetCrtc(device->drm_fd, device->crtc_p->crtc_id, device->default_fb_p->fb_id, 0, 0, &device->connector_p->connector_id, 1, &device->crtc_p->mode));
+
+  if (device->previous_bo) {
+    drmModeRmFB(device->drm_fd, device->previous_fb);
+    gbm_surface_release_buffer(device->gbmsurface, device->previous_bo);
+
+    device->previous_bo = NULL;
+    device->previous_fb = 0;
+  }
+}
 
 void OutputDisplay(device_t *device)
 {

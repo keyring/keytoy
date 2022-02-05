@@ -58,16 +58,8 @@ static void Render(canvas_t *canvas)
 
 
   ImGui::NewFrame();
+  ImGui::ShowDemoWindow(&show_demo_window);
 
-
-  // 2. Show a simple window that we create ourselves. We use a Begin/End pair to created a named window.
-
-  //  ImGui::Begin("h");                          // Create a window called "Hello, world!" and append into it.
-
-  ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
-
-  //ImGui::End();
-  ImGui::EndFrame();
 
   // Rendering
   ImGui::Render();
@@ -78,8 +70,6 @@ static void Render(canvas_t *canvas)
   glClear(GL_COLOR_BUFFER_BIT);
 
   ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-  eglSwapBuffers(canvas->display, canvas->surface);
 
 }
 
@@ -102,9 +92,16 @@ int main(void)
 
   InitGLES(&render_context);
 
-  Render(&render_context);
+  int count = 2;
+  // render loop
+  while(count--) {
+    Render(&render_context);
+    SwapBuffer(&render_device, &render_context);
+  }
 
-  OutputDisplay(&render_device);
+  // end
+  sleep(5);
+  RestoreDefaultFramebuffer(&render_device);
 
   // Cleanup
   ImGui_ImplOpenGL3_Shutdown();
