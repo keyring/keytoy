@@ -3,9 +3,9 @@ target = keytoy
 
 CC = clang++
 
-incdir = -I/usr/local/include -I/usr/local/include/libdrm
+incdir = -I/usr/local/include -I/usr/local/include/libdrm -I/usr/local/include/libepoll-shim
 libdir = -L/usr/local/lib
-lib = -lgbm -lepoxy -ldrm
+lib = -lgbm -lepoxy -ldrm -ludev -linput -lepoll-shim
 
 project_root = .
 external_root = $(project_root)/external

@@ -16,6 +16,8 @@
 #include <epoxy/gl.h>
 #include <epoxy/egl.h>
 
+#define ARRAY_LENGTH(a) (sizeof(a) / sizeof(a)[0])
+
 
 typedef struct
 {
