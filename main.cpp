@@ -11,9 +11,24 @@
 #include <libinput.h>
 
 #include "devices.h"
-
+#define STB_IMAGE_IMPLEMENTATION
+#include "external/stb/stb_image.h"
 #include "imgui/imgui.h"
 #include "imgui/backends/imgui_impl_opengl3.h"
+
+#include "glm/glm.hpp"
+#include "glm/gtc/matrix_transform.hpp"
+#include "glm/gtc/type_ptr.hpp"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include "xcursor/wlr_xcursor.h"
+
+#ifdef __cplusplus
+}
+#endif
 
 static int OpenRestricted(const char *path, int flags, void *user_data)
 {
@@ -31,6 +46,144 @@ const static struct libinput_interface input_interface = {
   .close_restricted = CloseRestricted,
 };
 
+/* opengl origin is bottom-left */
+static const GLfloat V2[] = {
+  0.f, 0.f,  // bottom-left
+  1.f, 0.f,  // bottom-right
+  0.f, 1.f,  // top-left
+  1.f, 1.f,  // top-right
+};
+
+static const GLfloat V3[] = {
+  0.f, 0.f, 0.f,  // bottom-left
+  1.f, 0.f, 0.f,  // bottom-right
+  0.f, 1.f, 0.f,  // top-left
+  1.f, 1.f, 0.f,  // top-right
+};
+
+/* image data origin is top-left (difference from opengl is Y-axis)*/
+static const GLfloat T2[] = {
+  0.f, 1.f,  // bottom-left
+  1.f, 1.f,  // bottom-right
+  0.f, 0.f,  // top-left
+  1.f, 0.f,  // top-right
+};
+
+static const GLuint QUAD_VERTEX_NUM = 4;
+
+static const char VERTEX_SHADER[] =
+  "uniform mat4 mvp;"
+  "attribute vec3 a_position;"
+  "attribute vec2 a_texcoord;"
+  "varying vec2 v_texcoord;"
+  "void main(){"
+  "    gl_Position = mvp * vec4(a_position, 1.0);"
+  "    v_texcoord = a_texcoord;"
+  "}";
+
+static const char FRAGMENT_SHADER[] =
+  "precision mediump float;"
+  "varying vec2 v_texcoord;"
+  "uniform sampler2D s_texture;"
+  "void main(){"
+  "    gl_FragColor = texture2D(s_texture, v_texcoord);"
+  "}";
+
+
+static void CreateTexture(GLuint *texture_id, GLint width, GLint height,  GLubyte *data)
+{
+
+  glGenTextures(1, texture_id);
+
+  glBindTexture(GL_TEXTURE_2D, *texture_id);
+
+  // set filtering mode
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+  // set wrap mode
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+  // load image data
+  if (!data) {
+
+    printf("failed to load image. use pixels replace\n");
+
+    GLubyte pixels[4 * 4] = {
+      255,    0,    0,   255, // red
+      0,    255,    0,   255, // green
+      0,      0,  255,   255, // blue
+      255,  255,    0,   255, // yellow
+    };
+
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+    data = pixels;
+    width = 2;
+    height = 2;
+  }
+  // upload texture data
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+  glGenerateMipmap(GL_TEXTURE_2D);
+}
+
+static GLuint LoadShader(const char *source, GLenum type)
+{
+  GLuint shader;
+  GLint compiled;
+
+  shader = glCreateShader(type);
+  glShaderSource(shader, 1, &source, NULL);
+  glCompileShader(shader);
+
+  glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+  if (!compiled) {
+    GLint infolen = 0;
+    glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infolen);
+    if (infolen > 1) {
+      char *infolog = (char *)malloc(infolen);
+      glGetShaderInfoLog(shader, infolen, NULL, infolog);
+      fprintf(stderr, "Error compiling shader:\n %s \n", infolog);
+      free(infolog);
+    }
+    glDeleteShader(shader);
+    return 0;
+  }
+
+  return shader;
+}
+
+static void CreateProgram(canvas_t *canvas)
+{
+  GLint linked;
+  GLuint vertex_shader;
+  GLuint fragment_shader;
+  assert((vertex_shader = LoadShader(VERTEX_SHADER, GL_VERTEX_SHADER)) != 0);
+  assert((fragment_shader = LoadShader(FRAGMENT_SHADER, GL_FRAGMENT_SHADER)) != 0);
+  assert((canvas->program = glCreateProgram()) != 0);
+  glAttachShader(canvas->program, vertex_shader);
+  glAttachShader(canvas->program, fragment_shader);
+  glLinkProgram(canvas->program);
+  glGetProgramiv(canvas->program, GL_LINK_STATUS, &linked);
+
+  glDeleteShader(vertex_shader);
+  glDeleteShader(fragment_shader);
+
+  if (!linked) {
+    GLint infolen = 0;
+    glGetProgramiv(canvas->program, GL_INFO_LOG_LENGTH, &infolen);
+    if (infolen > 1){
+      char *infolog = (char *)malloc(infolen);
+      glGetProgramInfoLog(canvas->program, infolen, NULL, infolog);
+      fprintf(stderr, "Error linking program:\n %s \n", infolog);
+      free(infolog);
+    }
+    glDeleteProgram(canvas->program);
+    exit(1);
+  }
+}
+
 static void InitGLES(canvas_t *canvas)
 {
   GLint major = 0;
@@ -41,6 +194,10 @@ static void InitGLES(canvas_t *canvas)
   sscanf(gl_version, "OpenGL ES %d.%d ", &major, &minor);
 
   printf("GL version: %s\nmajor: %d, minor: %d\n", gl_version, major, minor);
+
+  glViewport(0, 0, canvas->width, canvas->height);
+  glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+  glClearColor(0.45f, 0.55f, 0.6f, 1.f);
 }
 
 static void NewFrame(canvas_t *canvas)
@@ -51,7 +208,41 @@ static void NewFrame(canvas_t *canvas)
   io.DeltaTime = 1.f / 60.f;
 }
 
-static void Render(canvas_t *canvas)
+static void RenderCursor(canvas_t *canvas, wlr_xcursor_image *cursor_image)
+{
+  glUseProgram(canvas->program);
+
+  glm::mat4 projection = glm::ortho(0.f, 1.f*canvas->width, 0.f, 1.f*canvas->height, -1.f, 1.f);
+  glm::mat4 model = glm::mat4(1.f);
+  model = glm::translate(model, glm::vec3(canvas->width * 0.5, canvas->height * 0.5, 0.f));
+
+  //  model = glm::translate(model, glm::vec3(0.5f*48, 0.5f*48, 0.f));
+
+  model = glm::scale(model, glm::vec3(cursor_image->width, cursor_image->height, 1.f));
+
+  glm::mat4 mvp = projection * model;
+
+  glUniformMatrix4fv(glGetUniformLocation(canvas->program, "mvp"), 1, GL_FALSE, glm::value_ptr(mvp));
+ 
+  GLint position = glGetAttribLocation(canvas->program, "a_position");
+  glEnableVertexAttribArray(position);
+  glVertexAttribPointer(position, 3, GL_FLOAT, GL_FALSE, 0, (void *)V3);
+
+  GLint texcoord = glGetAttribLocation(canvas->program, "a_texcoord");
+  glEnableVertexAttribArray(texcoord);
+  glVertexAttribPointer(texcoord, 2, GL_FLOAT, GL_FALSE, 0, (void *)T2);
+
+
+  glEnable(GL_BLEND);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, canvas->texture_id);
+  glUniform1i(glGetUniformLocation(canvas->program, "s_texture"), 0);
+
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, QUAD_VERTEX_NUM);
+
+}
+
+static void RenderIMGUI(canvas_t *canvas)
 {
   // Our state
   bool show_demo_window = true;
@@ -67,13 +258,33 @@ static void Render(canvas_t *canvas)
   ImGui::ShowDemoWindow(&show_demo_window);
 
   // Rendering
+
   ImGui::Render();
 
-  glViewport(0, 0, canvas->width, canvas->height);
-  glClearColor(0.45f, 0.55f, 0.6f, 1.f);
-  glClear(GL_COLOR_BUFFER_BIT);
-
   ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+}
+
+
+static void Render(canvas_t *canvas)
+{
+
+}
+
+wlr_xcursor *InitCursor()
+{
+  wlr_xcursor_theme *cursor_theme = wlr_xcursor_theme_load("Adwaita", 48);
+  if (!cursor_theme){
+    printf("load cursor theme FAILED!\n");
+    return NULL;
+  }
+
+  wlr_xcursor *cursor = wlr_xcursor_theme_get_cursor(cursor_theme, "left_ptr");
+  if (!cursor){
+    printf("load cursor FAILED\n");
+    return NULL;
+  }
+
+  return cursor;
 
 }
 
@@ -115,6 +326,12 @@ int main(void)
   canvas_t render_context;
   CreateRenderContext(&render_device, &render_context);
 
+  wlr_xcursor *cursor = InitCursor();
+  struct wlr_xcursor_image *cursor_image = cursor->images[0];
+  if (!cursor_image) {
+    printf("load cursor images FAILED!\n");
+  }
+
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   ImGuiIO& io = ImGui::GetIO(); (void)io;
@@ -125,6 +342,8 @@ int main(void)
   ImGui_ImplOpenGL3_Init("#version 300 es");
 
   InitGLES(&render_context);
+  CreateProgram(&render_context);
+  CreateTexture(&(render_context.texture_id), cursor_image->width, cursor_image->height, cursor_image->buffer);
   /*    render     */
 
   bool is_need_quit = false;
@@ -159,8 +378,10 @@ int main(void)
 
       libinput_event_destroy(li_event);
     }
-
-    Render(&render_context);
+    glClear(GL_COLOR_BUFFER_BIT);
+    //Render(&render_context);
+    RenderIMGUI(&render_context);
+    RenderCursor(&render_context, cursor_image);
     SwapBuffer(&render_device, &render_context);
   }
 

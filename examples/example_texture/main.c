@@ -27,6 +27,7 @@ static void CreateTexture(GLuint *texture_id)
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
   // load image data
+  stbi_set_flip_vertically_on_load(true);
   GLint width, height, channels;
   GLubyte *data = stbi_load("container.jpg", &width, &height, &channels, 0);
   if (!data) {
@@ -146,27 +147,26 @@ static void InitGLES(canvas_t *canvas)
 static void Render(canvas_t *canvas)
 {
   GLfloat vertex[] = {
-    -1, -1, 0, 0, 0,
     -1, 1, 0,  0, 1,
-    1, 1, 0,   1, 0,
+    -1, -1, 0, 0, 0,
+    1, 1, 0,   1, 1,
+    1, -1, 0,  1, 0,
   };
-
-  void *start = &vertex[0];
 
   GLint position = glGetAttribLocation(canvas->program, "a_position");
   glEnableVertexAttribArray(position);
-  glVertexAttribPointer(position, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(GLfloat), start);
+  glVertexAttribPointer(position, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(GLfloat), &vertex[0]);
 
   GLint texcoord = glGetAttribLocation(canvas->program, "a_texcoord");
   glEnableVertexAttribArray(texcoord);
-  glVertexAttribPointer(texcoord, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(GLfloat), start + (3 * sizeof(GLfloat)));
+  glVertexAttribPointer(texcoord, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(GLfloat), (void *)&vertex[3]);
 
   glClear(GL_COLOR_BUFFER_BIT);
 
   glBindTexture(GL_TEXTURE_2D, canvas->texture_id);
   glUseProgram(canvas->program);
 
-  glDrawArrays(GL_TRIANGLES, 0, 3);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
   eglSwapBuffers(canvas->display, canvas->surface);
 
