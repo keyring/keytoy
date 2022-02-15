@@ -208,13 +208,13 @@ static void NewFrame(canvas_t *canvas)
   io.DeltaTime = 1.f / 60.f;
 }
 
-static void RenderCursor(canvas_t *canvas, wlr_xcursor_image *cursor_image)
+static void RenderCursor(canvas_t *canvas, wlr_xcursor_image *cursor_image, double posx, double posy)
 {
   glUseProgram(canvas->program);
 
   glm::mat4 projection = glm::ortho(0.f, 1.f*canvas->width, 0.f, 1.f*canvas->height, -1.f, 1.f);
   glm::mat4 model = glm::mat4(1.f);
-  model = glm::translate(model, glm::vec3(canvas->width * 0.5, canvas->height * 0.5, 0.f));
+  model = glm::translate(model, glm::vec3(posx, 1.0*canvas->height - posy - cursor_image->height, 0.f));
 
   //  model = glm::translate(model, glm::vec3(0.5f*48, 0.5f*48, 0.f));
 
@@ -295,6 +295,7 @@ int main(void)
   struct libinput *li;
   struct libinput_event *li_event;
   struct libinput_event_keyboard *li_event_kb;
+  struct libinput_event_pointer *li_event_pt;
   libinput_event_type li_event_type = LIBINPUT_EVENT_NONE;
   uint32_t keycode = 0;
 
@@ -350,6 +351,12 @@ int main(void)
   int count = 0;
   int event_count = 0;
 
+  uint32_t screen_width = render_device.default_fb_width;
+  uint32_t screen_height = render_device.default_fb_height;
+
+  double cursor_posx = screen_width * 0.5;
+  double cursor_posy = screen_height * 0.5;
+
   // loop
   while(!is_need_quit) {
 
@@ -359,12 +366,15 @@ int main(void)
     while ((li_event = libinput_get_event(li))) {
       li_event_type = libinput_event_get_type(li_event);
       printf("event_type: %d\n", li_event_type);
-      if (li_event_type == LIBINPUT_EVENT_DEVICE_ADDED) {
+
+      switch (li_event_type) {
+      case LIBINPUT_EVENT_DEVICE_ADDED: {
         struct libinput_device *dev = libinput_event_get_device(li_event);
         const char *name = libinput_device_get_name(dev);
         printf("Found Input Device: %s.\n", name);
       }
-      else if (li_event_type == LIBINPUT_EVENT_KEYBOARD_KEY){
+        break;
+      case LIBINPUT_EVENT_KEYBOARD_KEY: {
         if ( (li_event_kb = libinput_event_get_keyboard_event(li_event)) != NULL){
           keycode = libinput_event_keyboard_get_key(li_event_kb);
           printf("keycode: %d\n", keycode);
@@ -373,15 +383,39 @@ int main(void)
             is_need_quit = true;
           }
         }
-
       }
+        break;
+      case LIBINPUT_EVENT_POINTER_MOTION: {
+        if ((li_event_pt = libinput_event_get_pointer_event(li_event)) != NULL) {
+          double cursor_posx_dx = libinput_event_pointer_get_dx(li_event_pt);
+          double cursor_posy_dy = libinput_event_pointer_get_dy(li_event_pt);
 
+          cursor_posx = fmin(screen_width, fmax(0, cursor_posx + cursor_posx_dx));
+          cursor_posy = fmin(screen_height, fmax(0, cursor_posy + cursor_posy_dy));
+          printf("cursorx: %lf, cursory: %lf", cursor_posx_dx, cursor_posy_dy);
+        }
+      }
+        break;
+
+
+      case LIBINPUT_EVENT_POINTER_MOTION_ABSOLUTE: {
+        if ((li_event_pt = libinput_event_get_pointer_event(li_event)) != NULL) {
+          cursor_posx = libinput_event_pointer_get_absolute_x_transformed(li_event_pt, screen_width);
+          cursor_posy = libinput_event_pointer_get_absolute_y_transformed(li_event_pt, screen_height);
+        }
+      }
+        break;
+
+      default:
+        break;
+      }
       libinput_event_destroy(li_event);
     }
+
     glClear(GL_COLOR_BUFFER_BIT);
     //Render(&render_context);
     RenderIMGUI(&render_context);
-    RenderCursor(&render_context, cursor_image);
+    RenderCursor(&render_context, cursor_image, cursor_posx, cursor_posy);
     SwapBuffer(&render_device, &render_context);
   }
 
