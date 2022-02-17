@@ -9,6 +9,8 @@
 #include <sys/epoll.h>
 #include <libudev.h>
 #include <libinput.h>
+#include <linux/input.h>
+#include <iostream>
 
 #include "devices.h"
 #define STB_IMAGE_IMPLEMENTATION
@@ -335,7 +337,7 @@ int main(void)
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
-  ImGuiIO& io = ImGui::GetIO(); (void)io;
+  ImGuiIO& io = ImGui::GetIO();
 
   // Setup Dear ImGui style
   ImGui::StyleColorsDark();
@@ -392,7 +394,8 @@ int main(void)
 
           cursor_posx = fmin(screen_width, fmax(0, cursor_posx + cursor_posx_dx));
           cursor_posy = fmin(screen_height, fmax(0, cursor_posy + cursor_posy_dy));
-          printf("cursorx: %lf, cursory: %lf", cursor_posx_dx, cursor_posy_dy);
+          //printf("cursorx: %lf, cursory: %lf", cursor_posx_dx, cursor_posy_dy);
+          io.AddMousePosEvent((float)cursor_posx, (float)cursor_posy);
         }
       }
         break;
@@ -405,6 +408,28 @@ int main(void)
         }
       }
         break;
+
+      case LIBINPUT_EVENT_POINTER_BUTTON: {
+        if ((li_event_pt = libinput_event_get_pointer_event(li_event)) != NULL) {
+          uint32_t button = libinput_event_pointer_get_button(li_event_pt);
+          bool is_press = libinput_event_pointer_get_button_state(li_event_pt) == LIBINPUT_BUTTON_STATE_PRESSED;
+          int code = 0;
+          switch (button) {
+          case BTN_LEFT:
+            code = 0;
+            break;
+          case BTN_RIGHT:
+            code = 1;
+          case BTN_MIDDLE:
+            code = 2;
+          }
+          io.AddMouseButtonEvent(code, is_press);
+          std::cout << "button: " << button << ", is_pressed: " << is_press << std::endl;
+        }
+
+      }
+        break;
+
 
       default:
         break;
