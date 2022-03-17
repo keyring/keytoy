@@ -13,8 +13,6 @@
 #include <iostream>
 
 #include "devices.h"
-#define STB_IMAGE_IMPLEMENTATION
-#include "external/stb/stb_image.h"
 #include "imgui/imgui.h"
 #include "imgui/backends/imgui_impl_opengl3.h"
 

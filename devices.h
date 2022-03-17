@@ -1,5 +1,5 @@
-#ifndef __KT_DEVICES_H__
-#define __KT_DEVICES_H__
+#ifndef KT_DEVICES_H
+#define KT_DEVICES_H
 
 #include <stdio.h>
 #include <stdlib.h>
